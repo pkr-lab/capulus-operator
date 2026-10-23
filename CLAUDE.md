@@ -6,6 +6,7 @@ Go-Operator (controller-runtime) für das Capulus-Homelab. Sprache im Repo ist *
 
 - **Keine Kommentare im Code.** Einzige Ausnahmen: `// +kubebuilder:`-Marker und der Versions-Kommentar `# vX.Y.Z` hinter der Commit-SHA in `uses:`-Zeilen der Workflows.
 - **Doku liegt in [pkr-lab-docs](https://github.com/pkr-lab/pkr-lab-docs)**, nicht hier. Jede Codeänderung bekommt dort einen PR.
+- **Nie direkt auf `main` arbeiten.** Änderungen gehen nur per PR hinein (der Branch-Schutz auf GitHub ist hier nicht aktiv, die Regel gilt trotzdem). Steht das Arbeitsverzeichnis auf `main`, vor der ersten Änderung einen neuen Branch anlegen (`git switch -c <typ>/<kurzbeschreibung>`, z. B. `feat/backup-retention`, `fix/ca-pin`) und nur dort arbeiten. Den Branch legt Claude an, Commit, Push und PR macht der Nutzer.
 - **Claude committet und pusht nicht.** Commits, Pushes und PRs macht der Nutzer.
 - Conventional Commits, Scope = Bereich, Beschreibung auf Deutsch: `feat(backup): …`, `fix(controller): …`.
 - Keine Secrets im Repo. Der Operator legt Secrets nie im Klartext in Git ab.
