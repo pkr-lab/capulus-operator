@@ -33,7 +33,7 @@ type Defaults struct {
 const resticScript = `set -eu
 restic cat config >/dev/null 2>&1 || restic init
 restic backup --host "$BACKUP_HOST" --tag "$BACKUP_TAG" "$@"
-restic forget --host "$BACKUP_HOST" --tag "$BACKUP_TAG" --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY" --prune
+restic forget --host "$BACKUP_HOST" --tag "$BACKUP_TAG" --group-by host,tags --keep-daily "$KEEP_DAILY" --keep-weekly "$KEEP_WEEKLY" --keep-monthly "$KEEP_MONTHLY" --prune
 restic check --read-data-subset="$CHECK_SUBSET"
 echo "fertig: $(date -Iseconds)"
 `
