@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/pkr-lab/capulus-operator/compare/v1.1.1...v1.2.0) (2026-10-23)
+
+### Features
+
+* **github-actions:** add workflow to mirror repository to GitLab ([b256028](https://github.com/pkr-lab/capulus-operator/commit/b2560284ea1413d320dcaf8068fa5f163efd9203))
+
 ## [1.1.1](https://github.com/pkr-lab/capulus-operator/compare/v1.1.0...v1.1.1) (2026-10-23)
 
 ### Bug Fixes
