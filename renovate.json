@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":dependencyDashboard"
+  ],
+  "timezone": "Europe/Berlin",
+  "schedule": ["on monday"],
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "feat(deps):",
+  "minimumReleaseAge": "3 days",
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "description": "Kubernetes- und controller-runtime-Module gemeinsam anheben, sie müssen zueinander passen.",
+      "matchPackageNames": ["k8s.io/**", "sigs.k8s.io/**"],
+      "groupName": "kubernetes"
+    },
+    {
+      "matchUpdateTypes": ["patch"],
+      "schedule": ["at any time"]
+    }
+  ]
+}
