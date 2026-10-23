@@ -16,6 +16,11 @@ var (
 		Help: "Unix-Zeitpunkt des letzten gestarteten Backup-Laufs.",
 	}, []string{"namespace", "name"})
 
+	suspendedGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "capulus_backup_suspended",
+		Help: "1, wenn das Backup pausiert ist.",
+	}, []string{"namespace", "name"})
+
 	failedGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "capulus_backup_failed",
 		Help: "1, wenn der letzte Backup-Lauf fehlgeschlagen ist.",
@@ -23,5 +28,5 @@ var (
 )
 
 func init() {
-	metrics.Registry.MustRegister(lastSuccessGauge, lastScheduleGauge, failedGauge)
+	metrics.Registry.MustRegister(lastSuccessGauge, lastScheduleGauge, failedGauge, suspendedGauge)
 }

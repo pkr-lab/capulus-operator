@@ -144,6 +144,11 @@ func recordMetrics(b *v1alpha1.Backup) {
 		failed = 1
 	}
 	failedGauge.WithLabelValues(l...).Set(failed)
+	suspended := 0.0
+	if b.Spec.Suspend {
+		suspended = 1
+	}
+	suspendedGauge.WithLabelValues(l...).Set(suspended)
 }
 
 func forgetMetrics(namespace, name string) {
@@ -151,4 +156,5 @@ func forgetMetrics(namespace, name string) {
 	lastSuccessGauge.DeleteLabelValues(l...)
 	lastScheduleGauge.DeleteLabelValues(l...)
 	failedGauge.DeleteLabelValues(l...)
+	suspendedGauge.DeleteLabelValues(l...)
 }

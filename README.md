@@ -20,7 +20,7 @@ Ein `Backup` erzeugt einen CronJob (Owner-Referenz, wird bei Änderungen am Spec
 Ablauf eines Laufs:
 
 1. Pro SQLite- oder Postgres-Quelle ein InitContainer: `sqlite3 .backup` mit optionalem `integrity_check`, bzw. `pg_dump -F c`, Ergebnis nach `/stage`.
-2. Ein restic-Container sichert `/stage` und die PVC-Quellen (nur lesend gemountet), dann `forget --prune` nach `retention` und `check --read-data-subset`.
+2. Ein restic-Container sichert `/stage` und die PVC-Quellen (nur lesend gemountet), dann `forget --prune` nach `retention` (gruppiert nach Host und Tag, nicht nach Pfad) und `check --read-data-subset`.
 
 Quellentypen:
 
@@ -41,6 +41,7 @@ Metriken (Port 8080, für VictoriaMetrics):
 | `capulus_backup_last_success_timestamp_seconds` | Zeitpunkt des letzten erfolgreichen Laufs |
 | `capulus_backup_last_schedule_timestamp_seconds` | Zeitpunkt des letzten gestarteten Laufs |
 | `capulus_backup_failed` | 1, wenn der letzte Lauf fehlgeschlagen ist |
+| `capulus_backup_suspended` | 1, wenn das Backup pausiert ist |
 
 ## Entwicklung
 
