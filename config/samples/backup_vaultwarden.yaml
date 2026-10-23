@@ -1,0 +1,32 @@
+apiVersion: capulus.homeserver/v1alpha1
+kind: Backup
+metadata:
+  name: vaultwarden
+  namespace: vaultwarden
+spec:
+  schedule: "10 2 * * *"
+  timeZone: Europe/Berlin
+  repository:
+    pvcName: vaultwarden-restic
+    passwordSecretRef:
+      name: vaultwarden-restic
+      key: password
+  sources:
+    - name: data
+      type: SQLite
+      pvcName: vaultwarden-data
+      sqlite:
+        file: db.sqlite3
+  exclude:
+    - /sources/data/icon_cache
+    - /sources/data/tmp
+  retention:
+    keepDaily: 7
+    keepWeekly: 4
+    keepMonthly: 6
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

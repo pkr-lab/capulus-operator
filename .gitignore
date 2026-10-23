@@ -1,0 +1,10 @@
+bin/
+*.test
+*.out
+.idea/
+.env
+.env.*
+kubeconfig*
+*.kubeconfig
+*.pem
+*.key

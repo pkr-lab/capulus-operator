@@ -1,0 +1,28 @@
+apiVersion: capulus.homeserver/v1alpha1
+kind: Backup
+metadata:
+  name: immich-db
+  namespace: immich
+spec:
+  schedule: "30 3 * * *"
+  repository:
+    pvcName: immich-db-restic
+    passwordSecretRef:
+      name: immich-restic
+      key: password
+  sources:
+    - name: db
+      type: Postgres
+      postgres:
+        host: immich-postgresql
+        user: immich
+        database: immich
+        passwordSecretRef:
+          name: immich
+          key: db-password
+  images:
+    postgres: postgres:18-alpine
+  retention:
+    keepDaily: 7
+    keepWeekly: 0
+    keepMonthly: 0
