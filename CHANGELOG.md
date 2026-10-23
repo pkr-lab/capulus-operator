@@ -1,3 +1,9 @@
+## [1.1.1](https://github.com/pkr-lab/capulus-operator/compare/v1.1.0...v1.1.1) (2026-10-23)
+
+### Bug Fixes
+
+* **rbac:** Operator darf Events erzeugen ([f05bbe5](https://github.com/pkr-lab/capulus-operator/commit/f05bbe5d0214145fba0c74b8016e82442d660d22))
+
 ## [1.1.0](https://github.com/pkr-lab/capulus-operator/compare/v1.0.0...v1.1.0) (2026-10-23)
 
 ### Features
