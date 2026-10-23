@@ -1,3 +1,10 @@
+## [1.1.0](https://github.com/pkr-lab/capulus-operator/compare/v1.0.0...v1.1.0) (2026-10-23)
+
+### Features
+
+* **backup:** restic-Gruppierung, Metrik suspended, numerische UID, kurzer Image-Tag ([e1bf3e6](https://github.com/pkr-lab/capulus-operator/commit/e1bf3e6d32268683b707e69ca63b28c8e13b956b))
+* **build:** calculate short tag for image versioning ([917f05b](https://github.com/pkr-lab/capulus-operator/commit/917f05bd6046f223c6d711108f8676143dde6e62))
+
 ## 1.0.0 (2026-10-23)
 
 ### Features
