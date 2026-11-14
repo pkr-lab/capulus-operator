@@ -61,9 +61,11 @@ func newReconciler(t *testing.T, objs ...client.Object) (*BackupReconciler, clie
 	}, c
 }
 
+var backupKey = types.NamespacedName{Namespace: "apps", Name: "vw"}
+
 func reconcile(t *testing.T, r *BackupReconciler) error {
 	t.Helper()
-	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "apps", Name: "vw"}})
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: backupKey})
 	return err
 }
 
@@ -74,7 +76,7 @@ func TestReconcileCreatesCronJob(t *testing.T) {
 	}
 
 	var cj batchv1.CronJob
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &cj); err != nil {
+	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
 		t.Fatal(err)
 	}
 	if !metav1.IsControlledBy(&cj, testBackup()) {
@@ -85,7 +87,7 @@ func TestReconcileCreatesCronJob(t *testing.T) {
 	}
 
 	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &b); err != nil {
+	if err := c.Get(context.Background(), backupKey, &b); err != nil {
 		t.Fatal(err)
 	}
 	if b.Status.Phase != v1alpha1.BackupPhasePending || b.Status.CronJobName != "vw" {
@@ -103,7 +105,7 @@ func TestReconcileUpdatesOnSpecChange(t *testing.T) {
 	}
 
 	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &b); err != nil {
+	if err := c.Get(context.Background(), backupKey, &b); err != nil {
 		t.Fatal(err)
 	}
 	b.Spec.Schedule = "0 4 * * *"
@@ -115,7 +117,7 @@ func TestReconcileUpdatesOnSpecChange(t *testing.T) {
 	}
 
 	var cj batchv1.CronJob
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &cj); err != nil {
+	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
 		t.Fatal(err)
 	}
 	if cj.Spec.Schedule != "0 4 * * *" {
@@ -130,7 +132,7 @@ func TestReconcileUpdatesOnRetentionChange(t *testing.T) {
 	}
 
 	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &b); err != nil {
+	if err := c.Get(context.Background(), backupKey, &b); err != nil {
 		t.Fatal(err)
 	}
 	b.Spec.Retention.KeepDaily = 14
@@ -142,7 +144,7 @@ func TestReconcileUpdatesOnRetentionChange(t *testing.T) {
 	}
 
 	var cj batchv1.CronJob
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &cj); err != nil {
+	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
 		t.Fatal(err)
 	}
 	env := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0].Env
@@ -166,7 +168,7 @@ func TestReconcileRefusesForeignCronJob(t *testing.T) {
 	}
 
 	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &b); err != nil {
+	if err := c.Get(context.Background(), backupKey, &b); err != nil {
 		t.Fatal(err)
 	}
 	cond := meta.FindStatusCondition(b.Status.Conditions, backup.ConditionReady)
@@ -184,7 +186,7 @@ func TestReconcileInvalidSpecSetsNotReady(t *testing.T) {
 		t.Fatal("Fehler erwartet")
 	}
 	var got v1alpha1.Backup
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &got); err != nil {
+	if err := c.Get(context.Background(), backupKey, &got); err != nil {
 		t.Fatal(err)
 	}
 	if meta.IsStatusConditionTrue(got.Status.Conditions, backup.ConditionReady) {
@@ -199,7 +201,7 @@ func TestReconcileReflectsCronJobStatus(t *testing.T) {
 	}
 
 	var cj batchv1.CronJob
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &cj); err != nil {
+	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
 		t.Fatal(err)
 	}
 	sched := metav1.NewTime(time.Date(2026, 10, 23, 2, 10, 0, 0, time.UTC))
@@ -214,7 +216,7 @@ func TestReconcileReflectsCronJobStatus(t *testing.T) {
 	}
 
 	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &b); err != nil {
+	if err := c.Get(context.Background(), backupKey, &b); err != nil {
 		t.Fatal(err)
 	}
 	if b.Status.Phase != v1alpha1.BackupPhaseSucceeded {
