@@ -50,9 +50,9 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		logger.Error(err, "CronJob konnte nicht abgeglichen werden")
 		meta.SetStatusCondition(&b.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               backup.ConditionReady,
 			Status:             metav1.ConditionFalse,
-			Reason:             "ReconcileFailed",
+			Reason:             backup.ReasonReconcileFailed,
 			Message:            err.Error(),
 			ObservedGeneration: b.Generation,
 		})
@@ -65,9 +65,9 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	backup.ApplyStatus(&b, cj)
 	meta.SetStatusCondition(&b.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               backup.ConditionReady,
 		Status:             metav1.ConditionTrue,
-		Reason:             "CronJobSynced",
+		Reason:             backup.ReasonCronJobSynced,
 		Message:            fmt.Sprintf("CronJob %s abgeglichen", cj.Name),
 		ObservedGeneration: b.Generation,
 	})

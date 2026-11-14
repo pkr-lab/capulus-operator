@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -80,7 +81,7 @@ func TestBuildCronJobSQLite(t *testing.T) {
 	if cj.Spec.Schedule != "10 2 * * *" || *cj.Spec.TimeZone != "Europe/Berlin" {
 		t.Fatalf("Zeitplan falsch: %s %s", cj.Spec.Schedule, *cj.Spec.TimeZone)
 	}
-	if cj.Spec.ConcurrencyPolicy != "Forbid" {
+	if cj.Spec.ConcurrencyPolicy != batchv1.ForbidConcurrent {
 		t.Fatalf("ConcurrencyPolicy: %s", cj.Spec.ConcurrencyPolicy)
 	}
 	if cj.Labels[LabelManagedBy] != ManagedByValue || cj.Labels[LabelBackup] != "vw" {
@@ -224,19 +225,28 @@ func TestBuildCronJobValidation(t *testing.T) {
 	}
 }
 
+func mustHash(t *testing.T, b *v1alpha1.Backup) string {
+	t.Helper()
+	cj, err := BuildCronJob(b, testDefaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := SpecHash(cj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 func TestSpecHashStable(t *testing.T) {
-	a, _ := BuildCronJob(newBackup(sqliteSource()), testDefaults)
-	b, _ := BuildCronJob(newBackup(sqliteSource()), testDefaults)
-	ha, _ := SpecHash(a)
-	hb, _ := SpecHash(b)
+	ha := mustHash(t, newBackup(sqliteSource()))
+	hb := mustHash(t, newBackup(sqliteSource()))
 	if ha != hb {
 		t.Fatal("Hash nicht deterministisch")
 	}
 	changed := newBackup(sqliteSource())
 	changed.Spec.Schedule = "0 4 * * *"
-	c, _ := BuildCronJob(changed, testDefaults)
-	hc, _ := SpecHash(c)
-	if ha == hc {
+	if ha == mustHash(t, changed) {
 		t.Fatal("Hash ändert sich nicht bei geändertem Zeitplan")
 	}
 }
