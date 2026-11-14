@@ -8,7 +8,8 @@ RUN go mod download
 COPY api/ api/
 COPY cmd/ cmd/
 COPY internal/ internal/
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /manager ./cmd/manager
+ARG LDFLAGS="-s -w"
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="${LDFLAGS}" -o /manager ./cmd/manager
 
 FROM gcr.io/distroless/static-debian12:nonroot
 

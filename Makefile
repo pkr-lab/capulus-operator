@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 IMG ?= ghcr.io/pkr-lab/capulus-operator:dev
+LDFLAGS ?= -s -w
 
 .PHONY: help
 help: ## Show this help.
@@ -19,18 +20,22 @@ check-generated: generate ## Fehlschlag, wenn generierte Dateien nicht eingechec
 fmt: ## gofmt.
 	gofmt -w api cmd internal
 
+.PHONY: fmt-check
+fmt-check: ## Fehlschlag, wenn gofmt Dateien umformatieren würde.
+	@out="$$(gofmt -l api cmd internal)"; test -z "$$out" || { echo "$$out"; exit 1; }
+
 .PHONY: vet
 vet: ## go vet.
 	go vet ./...
 
 .PHONY: test
-test: ## Unit-Tests.
-	go test ./...
+test: ## Unit-Tests mit Race-Detector.
+	go test -race ./...
 
 .PHONY: build
 build: ## Manager nach bin/manager bauen.
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/manager ./cmd/manager
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/manager ./cmd/manager
 
 .PHONY: docker-build
 docker-build: ## Image bauen.
-	docker build -t $(IMG) .
+	docker build --build-arg LDFLAGS="$(LDFLAGS)" -t $(IMG) .

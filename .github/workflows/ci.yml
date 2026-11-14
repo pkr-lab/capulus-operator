@@ -27,7 +27,7 @@ jobs:
           go-version-file: go.mod
 
       - name: gofmt
-        run: test -z "$(gofmt -l api cmd internal)"
+        run: make fmt-check
 
       - name: go vet
         run: make vet
