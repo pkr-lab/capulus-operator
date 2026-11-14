@@ -54,16 +54,42 @@ func TestComputePhase(t *testing.T) {
 }
 
 func TestHealthCondition(t *testing.T) {
-	cases := map[v1alpha1.BackupPhase]metav1.ConditionStatus{
-		v1alpha1.BackupPhaseSucceeded: metav1.ConditionTrue,
-		v1alpha1.BackupPhaseFailed:    metav1.ConditionFalse,
-		v1alpha1.BackupPhaseRunning:   metav1.ConditionUnknown,
-		v1alpha1.BackupPhasePending:   metav1.ConditionUnknown,
-		v1alpha1.BackupPhaseSuspended: metav1.ConditionUnknown,
+	cases := map[v1alpha1.BackupPhase]struct {
+		status metav1.ConditionStatus
+		reason string
+	}{
+		v1alpha1.BackupPhaseSucceeded: {metav1.ConditionTrue, ReasonLastRunSucceeded},
+		v1alpha1.BackupPhaseFailed:    {metav1.ConditionFalse, ReasonLastRunFailed},
+		v1alpha1.BackupPhaseRunning:   {metav1.ConditionUnknown, string(v1alpha1.BackupPhaseRunning)},
+		v1alpha1.BackupPhasePending:   {metav1.ConditionUnknown, string(v1alpha1.BackupPhasePending)},
+		v1alpha1.BackupPhaseSuspended: {metav1.ConditionUnknown, ReasonSuspended},
 	}
 	for phase, want := range cases {
-		if got := HealthCondition(phase, 1).Status; got != want {
-			t.Fatalf("%s: erwartet %s, erhalten %s", phase, want, got)
+		got := HealthCondition(phase, 7)
+		if got.Type != ConditionHealthy || got.Status != want.status || got.Reason != want.reason || got.ObservedGeneration != 7 {
+			t.Fatalf("%s: erwartet %s/%s, erhalten %+v", phase, want.status, want.reason, got)
 		}
+	}
+}
+
+func TestApplyStatus(t *testing.T) {
+	b := &v1alpha1.Backup{}
+	b.Generation = 4
+	cj := &batchv1.CronJob{Status: batchv1.CronJobStatus{LastScheduleTime: at(2), LastSuccessfulTime: at(3)}}
+	cj.Name = "vw"
+	ApplyStatus(b, cj)
+	if b.Status.ObservedGeneration != 4 || b.Status.CronJobName != "vw" || b.Status.Phase != v1alpha1.BackupPhaseSucceeded {
+		t.Fatalf("Status unerwartet: %+v", b.Status)
+	}
+	if !b.Status.LastScheduleTime.Equal(at(2)) || !b.Status.LastSuccessfulTime.Equal(at(3)) {
+		t.Fatalf("Zeitstempel unerwartet: %+v", b.Status)
+	}
+	if b.Status.LastSuccessfulTime == cj.Status.LastSuccessfulTime {
+		t.Fatal("Zeitstempel nicht kopiert")
+	}
+
+	ApplyStatus(b, nil)
+	if b.Status.CronJobName != "" || b.Status.LastScheduleTime != nil || b.Status.LastSuccessfulTime != nil || b.Status.Phase != v1alpha1.BackupPhasePending {
+		t.Fatalf("Status ohne CronJob unerwartet: %+v", b.Status)
 	}
 }
