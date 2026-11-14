@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,7 +58,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			ObservedGeneration: b.Generation,
 		})
 		b.Status.ObservedGeneration = b.Generation
-		if statusErr := r.Status().Patch(ctx, &b, client.MergeFrom(orig)); statusErr != nil {
+		if statusErr := r.patchStatus(ctx, &b, orig); statusErr != nil {
 			logger.Error(statusErr, "Status konnte nicht geschrieben werden")
 		}
 		return ctrl.Result{}, err
@@ -74,10 +75,17 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	meta.SetStatusCondition(&b.Status.Conditions, backup.HealthCondition(b.Status.Phase, b.Generation))
 	recordMetrics(&b)
 
-	if err := r.Status().Patch(ctx, &b, client.MergeFrom(orig)); err != nil {
+	if err := r.patchStatus(ctx, &b, orig); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *BackupReconciler) patchStatus(ctx context.Context, b, orig *v1alpha1.Backup) error {
+	if equality.Semantic.DeepEqual(orig.Status, b.Status) {
+		return nil
+	}
+	return r.Status().Patch(ctx, b, client.MergeFrom(orig))
 }
 
 func (r *BackupReconciler) syncCronJob(ctx context.Context, b *v1alpha1.Backup) (*batchv1.CronJob, error) {

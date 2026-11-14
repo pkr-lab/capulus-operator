@@ -186,6 +186,20 @@ func TestReconcileWithoutChangeKeepsCronJob(t *testing.T) {
 	}
 }
 
+func TestReconcileWithoutChangeSkipsStatusPatch(t *testing.T) {
+	r, c := newReconciler(t, testBackup())
+	if err := reconcile(t, r); err != nil {
+		t.Fatal(err)
+	}
+	before := getBackup(t, c).ResourceVersion
+	if err := reconcile(t, r); err != nil {
+		t.Fatal(err)
+	}
+	if after := getBackup(t, c).ResourceVersion; after != before {
+		t.Fatalf("Status ohne Änderung gepatcht: %s -> %s", before, after)
+	}
+}
+
 func TestReconcileRestoresLabelsOnUpdate(t *testing.T) {
 	r, c := newReconciler(t, testBackup())
 	if err := reconcile(t, r); err != nil {
