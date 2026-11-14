@@ -63,6 +63,33 @@ func newReconciler(t *testing.T, objs ...client.Object) (*BackupReconciler, clie
 
 var backupKey = types.NamespacedName{Namespace: "apps", Name: "vw"}
 
+func getBackup(t *testing.T, c client.Client) v1alpha1.Backup {
+	t.Helper()
+	var b v1alpha1.Backup
+	if err := c.Get(context.Background(), backupKey, &b); err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func getCronJob(t *testing.T, c client.Client) batchv1.CronJob {
+	t.Helper()
+	var cj batchv1.CronJob
+	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
+		t.Fatal(err)
+	}
+	return cj
+}
+
+func envValue(c corev1.Container, name string) string {
+	for _, e := range c.Env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	return ""
+}
+
 func reconcile(t *testing.T, r *BackupReconciler) error {
 	t.Helper()
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: backupKey})
@@ -75,10 +102,7 @@ func TestReconcileCreatesCronJob(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var cj batchv1.CronJob
-	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
-		t.Fatal(err)
-	}
+	cj := getCronJob(t, c)
 	if !metav1.IsControlledBy(&cj, testBackup()) {
 		t.Fatalf("CronJob hat keinen Owner: %+v", cj.OwnerReferences)
 	}
@@ -86,10 +110,7 @@ func TestReconcileCreatesCronJob(t *testing.T) {
 		t.Fatal("Hash-Annotation fehlt")
 	}
 
-	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), backupKey, &b); err != nil {
-		t.Fatal(err)
-	}
+	b := getBackup(t, c)
 	if b.Status.Phase != v1alpha1.BackupPhasePending || b.Status.CronJobName != "vw" {
 		t.Fatalf("Status: %+v", b.Status)
 	}
@@ -99,15 +120,83 @@ func TestReconcileCreatesCronJob(t *testing.T) {
 }
 
 func TestReconcileUpdatesOnSpecChange(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*v1alpha1.Backup)
+		check  func(*testing.T, batchv1.CronJob)
+	}{
+		{
+			name:   "Zeitplan",
+			mutate: func(b *v1alpha1.Backup) { b.Spec.Schedule = "0 4 * * *" },
+			check: func(t *testing.T, cj batchv1.CronJob) {
+				if cj.Spec.Schedule != "0 4 * * *" {
+					t.Fatalf("Zeitplan nicht aktualisiert: %s", cj.Spec.Schedule)
+				}
+			},
+		},
+		{
+			name:   "Retention",
+			mutate: func(b *v1alpha1.Backup) { b.Spec.Retention.KeepDaily = 14 },
+			check: func(t *testing.T, cj batchv1.CronJob) {
+				if got := envValue(cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0], "KEEP_DAILY"); got != "14" {
+					t.Fatalf("KEEP_DAILY: %q", got)
+				}
+			},
+		},
+		{
+			name:   "Suspend",
+			mutate: func(b *v1alpha1.Backup) { b.Spec.Suspend = true },
+			check: func(t *testing.T, cj batchv1.CronJob) {
+				if cj.Spec.Suspend == nil || !*cj.Spec.Suspend {
+					t.Fatal("Suspend nicht übernommen")
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, c := newReconciler(t, testBackup())
+			if err := reconcile(t, r); err != nil {
+				t.Fatal(err)
+			}
+			b := getBackup(t, c)
+			tc.mutate(&b)
+			if err := c.Update(context.Background(), &b); err != nil {
+				t.Fatal(err)
+			}
+			if err := reconcile(t, r); err != nil {
+				t.Fatal(err)
+			}
+			tc.check(t, getCronJob(t, c))
+		})
+	}
+}
+
+func TestReconcileWithoutChangeKeepsCronJob(t *testing.T) {
 	r, c := newReconciler(t, testBackup())
 	if err := reconcile(t, r); err != nil {
 		t.Fatal(err)
 	}
-
-	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), backupKey, &b); err != nil {
+	before := getCronJob(t, c).ResourceVersion
+	if err := reconcile(t, r); err != nil {
 		t.Fatal(err)
 	}
+	if after := getCronJob(t, c).ResourceVersion; after != before {
+		t.Fatalf("CronJob ohne Spec-Änderung aktualisiert: %s -> %s", before, after)
+	}
+}
+
+func TestReconcileRestoresLabelsOnUpdate(t *testing.T) {
+	r, c := newReconciler(t, testBackup())
+	if err := reconcile(t, r); err != nil {
+		t.Fatal(err)
+	}
+	cj := getCronJob(t, c)
+	cj.Labels = map[string]string{"fremd": "x"}
+	if err := c.Update(context.Background(), &cj); err != nil {
+		t.Fatal(err)
+	}
+	b := getBackup(t, c)
 	b.Spec.Schedule = "0 4 * * *"
 	if err := c.Update(context.Background(), &b); err != nil {
 		t.Fatal(err)
@@ -115,47 +204,29 @@ func TestReconcileUpdatesOnSpecChange(t *testing.T) {
 	if err := reconcile(t, r); err != nil {
 		t.Fatal(err)
 	}
-
-	var cj batchv1.CronJob
-	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
-		t.Fatal(err)
-	}
-	if cj.Spec.Schedule != "0 4 * * *" {
-		t.Fatalf("Zeitplan nicht aktualisiert: %s", cj.Spec.Schedule)
+	got := getCronJob(t, c).Labels
+	if got[backup.LabelManagedBy] != backup.ManagedByValue || got[backup.LabelBackup] != "vw" || got["fremd"] != "" {
+		t.Fatalf("Labels nicht wiederhergestellt: %v", got)
 	}
 }
 
-func TestReconcileUpdatesOnRetentionChange(t *testing.T) {
-	r, c := newReconciler(t, testBackup())
+func TestReconcileSuspendedBackup(t *testing.T) {
+	b := testBackup()
+	b.Spec.Suspend = true
+	r, c := newReconciler(t, b)
 	if err := reconcile(t, r); err != nil {
 		t.Fatal(err)
 	}
-
-	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), backupKey, &b); err != nil {
-		t.Fatal(err)
+	if cj := getCronJob(t, c); cj.Spec.Suspend == nil || !*cj.Spec.Suspend {
+		t.Fatal("CronJob nicht pausiert")
 	}
-	b.Spec.Retention.KeepDaily = 14
-	if err := c.Update(context.Background(), &b); err != nil {
-		t.Fatal(err)
+	got := getBackup(t, c)
+	if got.Status.Phase != v1alpha1.BackupPhaseSuspended {
+		t.Fatalf("Phase: %s", got.Status.Phase)
 	}
-	if err := reconcile(t, r); err != nil {
-		t.Fatal(err)
-	}
-
-	var cj batchv1.CronJob
-	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
-		t.Fatal(err)
-	}
-	env := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0].Env
-	var got string
-	for _, e := range env {
-		if e.Name == "KEEP_DAILY" {
-			got = e.Value
-		}
-	}
-	if got != "14" {
-		t.Fatalf("KEEP_DAILY: %q", got)
+	cond := meta.FindStatusCondition(got.Status.Conditions, backup.ConditionHealthy)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != backup.ReasonSuspended {
+		t.Fatalf("Healthy-Condition: %+v", cond)
 	}
 }
 
@@ -167,10 +238,7 @@ func TestReconcileRefusesForeignCronJob(t *testing.T) {
 		t.Fatal("Fehler erwartet, weil der CronJob nicht dem Backup gehört")
 	}
 
-	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), backupKey, &b); err != nil {
-		t.Fatal(err)
-	}
+	b := getBackup(t, c)
 	cond := meta.FindStatusCondition(b.Status.Conditions, backup.ConditionReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse {
 		t.Fatalf("Ready=False erwartet: %+v", b.Status.Conditions)
@@ -185,10 +253,7 @@ func TestReconcileInvalidSpecSetsNotReady(t *testing.T) {
 	if err := reconcile(t, r); err == nil {
 		t.Fatal("Fehler erwartet")
 	}
-	var got v1alpha1.Backup
-	if err := c.Get(context.Background(), backupKey, &got); err != nil {
-		t.Fatal(err)
-	}
+	got := getBackup(t, c)
 	if meta.IsStatusConditionTrue(got.Status.Conditions, backup.ConditionReady) {
 		t.Fatal("Ready darf nicht True sein")
 	}
@@ -200,10 +265,7 @@ func TestReconcileReflectsCronJobStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var cj batchv1.CronJob
-	if err := c.Get(context.Background(), backupKey, &cj); err != nil {
-		t.Fatal(err)
-	}
+	cj := getCronJob(t, c)
 	sched := metav1.NewTime(time.Date(2026, 10, 23, 2, 10, 0, 0, time.UTC))
 	done := metav1.NewTime(time.Date(2026, 10, 23, 2, 12, 0, 0, time.UTC))
 	cj.Status.LastScheduleTime = &sched
@@ -215,10 +277,7 @@ func TestReconcileReflectsCronJobStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var b v1alpha1.Backup
-	if err := c.Get(context.Background(), backupKey, &b); err != nil {
-		t.Fatal(err)
-	}
+	b := getBackup(t, c)
 	if b.Status.Phase != v1alpha1.BackupPhaseSucceeded {
 		t.Fatalf("Phase: %s", b.Status.Phase)
 	}
