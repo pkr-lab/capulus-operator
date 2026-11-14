@@ -82,90 +82,125 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 	}
 
 	images := resolveImages(b, d)
-	host := b.Spec.Host
-	if host == "" {
-		host = b.Name
+	plan := planSources(b, images)
+	podSpec := corev1.PodSpec{
+		RestartPolicy:  corev1.RestartPolicyNever,
+		InitContainers: plan.initContainers,
+		Containers:     []corev1.Container{resticContainer(b, images.ResticImage, plan)},
+		Volumes:        append(baseVolumes(b), plan.volumes...),
 	}
+	return cronJobFor(b, podSpec), nil
+}
 
-	volumes := []corev1.Volume{
-		{Name: volumeRepo, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: b.Spec.Repository.PVCName}}},
-		{Name: volumeStage, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-		{Name: volumeCache, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-	}
-	resticMounts := []corev1.VolumeMount{
-		{Name: volumeRepo, MountPath: repoPath},
-		{Name: volumeStage, MountPath: stagePath},
-		{Name: volumeCache, MountPath: cachePath},
-	}
+type sourcePlan struct {
+	volumes        []corev1.Volume
+	resticMounts   []corev1.VolumeMount
+	initContainers []corev1.Container
+	backupArgs     []string
+}
 
-	var initContainers []corev1.Container
-	var backupArgs []string
+func planSources(b *v1alpha1.Backup, images Defaults) sourcePlan {
+	var plan sourcePlan
 	staged := false
 
 	for _, s := range b.Spec.Sources {
 		srcDir := path.Join(sourcesPath, s.Name)
-		stageDir := path.Join(stagePath, s.Name)
-		volName := sourceVolumePrefix + s.Name
-
+		srcMount := corev1.VolumeMount{Name: sourceVolumePrefix + s.Name, MountPath: srcDir, ReadOnly: true}
 		if s.PVCName != "" {
-			volumes = append(volumes, corev1.Volume{
-				Name: volName,
-				VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: s.PVCName,
-					ReadOnly:  true,
-				}},
-			})
+			plan.volumes = append(plan.volumes, sourceVolume(s))
 		}
-		srcMount := corev1.VolumeMount{Name: volName, MountPath: srcDir, ReadOnly: true}
 
 		switch s.Type {
 		case v1alpha1.SourceTypeFiles:
-			resticMounts = append(resticMounts, srcMount)
-			backupArgs = append(backupArgs, srcDir)
+			plan.resticMounts = append(plan.resticMounts, srcMount)
+			plan.backupArgs = append(plan.backupArgs, srcDir)
 
 		case v1alpha1.SourceTypeSQLite:
 			staged = true
-			resticMounts = append(resticMounts, srcMount)
-			backupArgs = append(backupArgs, srcDir, "--exclude", path.Join(srcDir, s.SQLite.File)+"*")
-			dst := path.Join(stageDir, path.Base(s.SQLite.File))
-			initContainers = append(initContainers, corev1.Container{
-				Name:            stageContainerPrefix + s.Name,
-				Image:           images.SQLiteImage,
-				ImagePullPolicy: corev1.PullIfNotPresent,
-				Command:         []string{"sh", "-c", sqliteScript, "stage", path.Join(srcDir, s.SQLite.File), dst, strconv.FormatBool(s.SQLite.IntegrityCheck)},
-				VolumeMounts:    []corev1.VolumeMount{srcMount, {Name: volumeStage, MountPath: stagePath}},
-				Resources:       b.Spec.Resources,
-			})
+			plan.resticMounts = append(plan.resticMounts, srcMount)
+			plan.backupArgs = append(plan.backupArgs, srcDir, "--exclude", path.Join(srcDir, s.SQLite.File)+"*")
+			plan.initContainers = append(plan.initContainers, sqliteStageContainer(s, srcMount, images.SQLiteImage, b.Spec.Resources))
 
 		case v1alpha1.SourceTypePostgres:
 			staged = true
-			pg := s.Postgres
-			dst := path.Join(stageDir, pg.Database+".dump")
-			initContainers = append(initContainers, corev1.Container{
-				Name:            stageContainerPrefix + s.Name,
-				Image:           images.PostgresImage,
-				ImagePullPolicy: corev1.PullIfNotPresent,
-				Env: []corev1.EnvVar{{
-					Name:      "PGPASSWORD",
-					ValueFrom: &corev1.EnvVarSource{SecretKeyRef: pg.PasswordSecretRef.DeepCopy()},
-				}},
-				Command:      []string{"sh", "-c", postgresScript, "stage", pg.Host, strconv.Itoa(int(pgPort(pg))), pg.User, pg.Database, dst},
-				VolumeMounts: []corev1.VolumeMount{{Name: volumeStage, MountPath: stagePath}},
-				Resources:    b.Spec.Resources,
-			})
+			plan.initContainers = append(plan.initContainers, postgresStageContainer(s, images.PostgresImage, b.Spec.Resources))
 		}
 	}
 
 	if staged {
-		backupArgs = append([]string{stagePath}, backupArgs...)
+		plan.backupArgs = append([]string{stagePath}, plan.backupArgs...)
 	}
 	for _, e := range b.Spec.Exclude {
-		backupArgs = append(backupArgs, "--exclude", e)
+		plan.backupArgs = append(plan.backupArgs, "--exclude", e)
 	}
+	return plan
+}
 
-	restic := corev1.Container{
+func baseVolumes(b *v1alpha1.Backup) []corev1.Volume {
+	return []corev1.Volume{
+		{Name: volumeRepo, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: b.Spec.Repository.PVCName}}},
+		{Name: volumeStage, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: volumeCache, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+	}
+}
+
+func sourceVolume(s v1alpha1.BackupSource) corev1.Volume {
+	return corev1.Volume{
+		Name: sourceVolumePrefix + s.Name,
+		VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+			ClaimName: s.PVCName,
+			ReadOnly:  true,
+		}},
+	}
+}
+
+func stageMount() corev1.VolumeMount {
+	return corev1.VolumeMount{Name: volumeStage, MountPath: stagePath}
+}
+
+func sqliteStageContainer(s v1alpha1.BackupSource, srcMount corev1.VolumeMount, image string, res corev1.ResourceRequirements) corev1.Container {
+	src := path.Join(srcMount.MountPath, s.SQLite.File)
+	dst := path.Join(stagePath, s.Name, path.Base(s.SQLite.File))
+	return corev1.Container{
+		Name:            stageContainerPrefix + s.Name,
+		Image:           image,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"sh", "-c", sqliteScript, "stage", src, dst, strconv.FormatBool(s.SQLite.IntegrityCheck)},
+		VolumeMounts:    []corev1.VolumeMount{srcMount, stageMount()},
+		Resources:       res,
+	}
+}
+
+func postgresStageContainer(s v1alpha1.BackupSource, image string, res corev1.ResourceRequirements) corev1.Container {
+	pg := s.Postgres
+	dst := path.Join(stagePath, s.Name, pg.Database+".dump")
+	return corev1.Container{
+		Name:            stageContainerPrefix + s.Name,
+		Image:           image,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Env: []corev1.EnvVar{{
+			Name:      "PGPASSWORD",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: pg.PasswordSecretRef.DeepCopy()},
+		}},
+		Command:      []string{"sh", "-c", postgresScript, "stage", pg.Host, strconv.Itoa(int(pgPort(pg))), pg.User, pg.Database, dst},
+		VolumeMounts: []corev1.VolumeMount{stageMount()},
+		Resources:    res,
+	}
+}
+
+func resticContainer(b *v1alpha1.Backup, image string, plan sourcePlan) corev1.Container {
+	host := b.Spec.Host
+	if host == "" {
+		host = b.Name
+	}
+	mounts := append([]corev1.VolumeMount{
+		{Name: volumeRepo, MountPath: repoPath},
+		stageMount(),
+		{Name: volumeCache, MountPath: cachePath},
+	}, plan.resticMounts...)
+	return corev1.Container{
 		Name:            "restic",
-		Image:           images.ResticImage,
+		Image:           image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Env: []corev1.EnvVar{
 			{Name: "RESTIC_REPOSITORY", Value: repoPath},
@@ -178,14 +213,15 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 			{Name: "KEEP_MONTHLY", Value: strconv.Itoa(int(b.Spec.Retention.KeepMonthly))},
 			{Name: "CHECK_SUBSET", Value: checkSubset(b)},
 		},
-		Command:      append([]string{"sh", "-c", resticScript, "restic-backup"}, backupArgs...),
+		Command:      append([]string{"sh", "-c", resticScript, "restic-backup"}, plan.backupArgs...),
 		Resources:    b.Spec.Resources,
-		VolumeMounts: resticMounts,
+		VolumeMounts: mounts,
 	}
+}
 
+func cronJobFor(b *v1alpha1.Backup, podSpec corev1.PodSpec) *batchv1.CronJob {
 	labels := Labels(b)
-
-	cj := &batchv1.CronJob{
+	return &batchv1.CronJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      b.Name,
 			Namespace: b.Namespace,
@@ -204,18 +240,12 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 					BackoffLimit: ptr.To(int32(jobBackoffLimit)),
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: labels},
-						Spec: corev1.PodSpec{
-							RestartPolicy:  corev1.RestartPolicyNever,
-							InitContainers: initContainers,
-							Containers:     []corev1.Container{restic},
-							Volumes:        volumes,
-						},
+						Spec:       podSpec,
 					},
 				},
 			},
 		},
 	}
-	return cj, nil
 }
 
 func validate(b *v1alpha1.Backup) error {
