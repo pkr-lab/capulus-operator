@@ -8,3 +8,7 @@ kubeconfig*
 *.kubeconfig
 *.pem
 *.key
+.vscode/
+.DS_Store
+*.swp
+cover.html
