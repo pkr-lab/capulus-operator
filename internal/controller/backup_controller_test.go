@@ -91,7 +91,7 @@ func TestReconcileCreatesCronJob(t *testing.T) {
 	if b.Status.Phase != v1alpha1.BackupPhasePending || b.Status.CronJobName != "vw" {
 		t.Fatalf("Status: %+v", b.Status)
 	}
-	if !meta.IsStatusConditionTrue(b.Status.Conditions, "Ready") {
+	if !meta.IsStatusConditionTrue(b.Status.Conditions, backup.ConditionReady) {
 		t.Fatalf("Ready nicht gesetzt: %+v", b.Status.Conditions)
 	}
 }
@@ -169,7 +169,7 @@ func TestReconcileRefusesForeignCronJob(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &b); err != nil {
 		t.Fatal(err)
 	}
-	cond := meta.FindStatusCondition(b.Status.Conditions, "Ready")
+	cond := meta.FindStatusCondition(b.Status.Conditions, backup.ConditionReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse {
 		t.Fatalf("Ready=False erwartet: %+v", b.Status.Conditions)
 	}
@@ -187,7 +187,7 @@ func TestReconcileInvalidSpecSetsNotReady(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "vw"}, &got); err != nil {
 		t.Fatal(err)
 	}
-	if meta.IsStatusConditionTrue(got.Status.Conditions, "Ready") {
+	if meta.IsStatusConditionTrue(got.Status.Conditions, backup.ConditionReady) {
 		t.Fatal("Ready darf nicht True sein")
 	}
 }
@@ -223,7 +223,7 @@ func TestReconcileReflectsCronJobStatus(t *testing.T) {
 	if b.Status.LastSuccessfulTime == nil || !b.Status.LastSuccessfulTime.Equal(&done) {
 		t.Fatalf("LastSuccessfulTime: %v", b.Status.LastSuccessfulTime)
 	}
-	if !meta.IsStatusConditionTrue(b.Status.Conditions, "Healthy") {
+	if !meta.IsStatusConditionTrue(b.Status.Conditions, backup.ConditionHealthy) {
 		t.Fatalf("Healthy nicht True: %+v", b.Status.Conditions)
 	}
 }

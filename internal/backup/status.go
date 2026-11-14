@@ -11,6 +11,17 @@ import (
 	v1alpha1 "github.com/pkr-lab/capulus-operator/api/v1alpha1"
 )
 
+const (
+	ConditionReady   = "Ready"
+	ConditionHealthy = "Healthy"
+
+	ReasonReconcileFailed  = "ReconcileFailed"
+	ReasonCronJobSynced    = "CronJobSynced"
+	ReasonLastRunSucceeded = "LastRunSucceeded"
+	ReasonLastRunFailed    = "LastRunFailed"
+	ReasonSuspended        = "Suspended"
+)
+
 func SpecHash(cj *batchv1.CronJob) (string, error) {
 	raw, err := json.Marshal(cj.Spec)
 	if err != nil {
@@ -57,16 +68,16 @@ func ApplyStatus(b *v1alpha1.Backup, cj *batchv1.CronJob) {
 
 func HealthCondition(phase v1alpha1.BackupPhase, generation int64) metav1.Condition {
 	c := metav1.Condition{
-		Type:               "Healthy",
+		Type:               ConditionHealthy,
 		ObservedGeneration: generation,
 	}
 	switch phase {
 	case v1alpha1.BackupPhaseSucceeded:
-		c.Status, c.Reason, c.Message = metav1.ConditionTrue, "LastRunSucceeded", "letzter Lauf erfolgreich"
+		c.Status, c.Reason, c.Message = metav1.ConditionTrue, ReasonLastRunSucceeded, "letzter Lauf erfolgreich"
 	case v1alpha1.BackupPhaseFailed:
-		c.Status, c.Reason, c.Message = metav1.ConditionFalse, "LastRunFailed", "letzter Lauf fehlgeschlagen"
+		c.Status, c.Reason, c.Message = metav1.ConditionFalse, ReasonLastRunFailed, "letzter Lauf fehlgeschlagen"
 	case v1alpha1.BackupPhaseSuspended:
-		c.Status, c.Reason, c.Message = metav1.ConditionUnknown, "Suspended", "Backup ist pausiert"
+		c.Status, c.Reason, c.Message = metav1.ConditionUnknown, ReasonSuspended, "Backup ist pausiert"
 	default:
 		c.Status, c.Reason, c.Message = metav1.ConditionUnknown, string(phase), "noch kein abgeschlossener Lauf"
 	}
