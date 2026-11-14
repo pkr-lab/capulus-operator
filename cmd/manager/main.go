@@ -45,6 +45,10 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
 	setupLog := ctrl.Log.WithName("setup")
+	exitOnError := func(err error, msg string) {
+		setupLog.Error(err, msg)
+		os.Exit(1)
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                  scheme,
@@ -55,8 +59,7 @@ func main() {
 		LeaderElectionNamespace: leaderElectNS,
 	})
 	if err != nil {
-		setupLog.Error(err, "Manager konnte nicht erstellt werden")
-		os.Exit(1)
+		exitOnError(err, "Manager konnte nicht erstellt werden")
 	}
 
 	if err := (&controller.BackupReconciler{
@@ -64,22 +67,18 @@ func main() {
 		Scheme:   mgr.GetScheme(),
 		Defaults: defaults,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Backup-Controller konnte nicht registriert werden")
-		os.Exit(1)
+		exitOnError(err, "Backup-Controller konnte nicht registriert werden")
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "healthz fehlgeschlagen")
-		os.Exit(1)
+		exitOnError(err, "healthz fehlgeschlagen")
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "readyz fehlgeschlagen")
-		os.Exit(1)
+		exitOnError(err, "readyz fehlgeschlagen")
 	}
 
 	setupLog.Info("Operator startet")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "Manager beendet")
-		os.Exit(1)
+		exitOnError(err, "Manager beendet")
 	}
 }
