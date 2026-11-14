@@ -3,3 +3,12 @@
 bin
 config
 *.md
+.env
+.env.*
+kubeconfig*
+*.kubeconfig
+*.pem
+*.key
+*.test
+*.out
+.idea
