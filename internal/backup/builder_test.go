@@ -2,11 +2,13 @@ package backup
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	v1alpha1 "github.com/pkr-lab/capulus-operator/api/v1alpha1"
 )
@@ -207,19 +209,86 @@ func TestBuildCronJobMixedSources(t *testing.T) {
 	}
 }
 
-func TestBuildCronJobValidation(t *testing.T) {
-	cases := map[string]*v1alpha1.Backup{
-		"keine Quelle":      newBackup(),
-		"doppelter Name":    newBackup(filesSource(), filesSource()),
-		"Files ohne PVC":    newBackup(v1alpha1.BackupSource{Name: "x", Type: v1alpha1.SourceTypeFiles}),
-		"SQLite ohne Datei": newBackup(v1alpha1.BackupSource{Name: "x", Type: v1alpha1.SourceTypeSQLite, PVCName: "p"}),
-		"Postgres ohne Cfg": newBackup(v1alpha1.BackupSource{Name: "x", Type: v1alpha1.SourceTypePostgres}),
-		"unbekannter Typ":   newBackup(v1alpha1.BackupSource{Name: "x", Type: "Mongo"}),
+func TestBuildCronJobSQLiteWithoutIntegrityCheck(t *testing.T) {
+	src := sqliteSource()
+	src.SQLite.IntegrityCheck = false
+	cj, err := BuildCronJob(newBackup(src), testDefaults)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for name, b := range cases {
+	cmd := cj.Spec.JobTemplate.Spec.Template.Spec.InitContainers[0].Command
+	if got := cmd[len(cmd)-1]; got != "false" {
+		t.Fatalf("IntegrityCheck-Argument: %q", got)
+	}
+}
+
+func TestBuildCronJobPostgresCustomPort(t *testing.T) {
+	src := postgresSource()
+	src.Postgres.Port = 6543
+	cj, err := BuildCronJob(newBackup(src), testDefaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"stage", "pg", "6543", "app", "appdb", "/stage/db/appdb.dump"}
+	if got := cj.Spec.JobTemplate.Spec.Template.Spec.InitContainers[0].Command[3:]; !slices.Equal(got, want) {
+		t.Fatalf("Argumente: %v", got)
+	}
+}
+
+func TestBuildCronJobScheduleDefaults(t *testing.T) {
+	cj, err := BuildCronJob(newBackup(filesSource()), testDefaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *cj.Spec.FailedJobsHistoryLimit != 3 || *cj.Spec.SuccessfulJobsHistoryLimit != 3 {
+		t.Fatalf("History-Limits: %d/%d", *cj.Spec.FailedJobsHistoryLimit, *cj.Spec.SuccessfulJobsHistoryLimit)
+	}
+	if *cj.Spec.Suspend {
+		t.Fatal("Suspend darf standardmäßig nicht gesetzt sein")
+	}
+	if *cj.Spec.JobTemplate.Spec.BackoffLimit != 2 {
+		t.Fatalf("BackoffLimit: %d", *cj.Spec.JobTemplate.Spec.BackoffLimit)
+	}
+}
+
+func TestBuildCronJobScheduleOverrides(t *testing.T) {
+	b := newBackup(filesSource())
+	b.Spec.FailedJobsHistoryLimit = ptr.To(int32(5))
+	b.Spec.SuccessfulJobsHistoryLimit = ptr.To(int32(0))
+	b.Spec.TimeZone = "UTC"
+	b.Spec.Suspend = true
+	cj, err := BuildCronJob(b, testDefaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *cj.Spec.FailedJobsHistoryLimit != 5 || *cj.Spec.SuccessfulJobsHistoryLimit != 0 {
+		t.Fatalf("History-Limits: %d/%d", *cj.Spec.FailedJobsHistoryLimit, *cj.Spec.SuccessfulJobsHistoryLimit)
+	}
+	if *cj.Spec.TimeZone != "UTC" || !*cj.Spec.Suspend {
+		t.Fatalf("TimeZone/Suspend nicht übernommen: %s %v", *cj.Spec.TimeZone, *cj.Spec.Suspend)
+	}
+}
+
+func TestBuildCronJobValidation(t *testing.T) {
+	cases := map[string]struct {
+		backup *v1alpha1.Backup
+		want   string
+	}{
+		"keine Quelle":      {newBackup(), "mindestens eine Quelle"},
+		"doppelter Name":    {newBackup(filesSource(), filesSource()), `Quelle "files" doppelt`},
+		"Files ohne PVC":    {newBackup(v1alpha1.BackupSource{Name: "x", Type: v1alpha1.SourceTypeFiles}), "pvcName fehlt"},
+		"SQLite ohne Datei": {newBackup(v1alpha1.BackupSource{Name: "x", Type: v1alpha1.SourceTypeSQLite, PVCName: "p"}), "sqlite.file nötig"},
+		"Postgres ohne Cfg": {newBackup(v1alpha1.BackupSource{Name: "x", Type: v1alpha1.SourceTypePostgres}), "postgres fehlt"},
+		"unbekannter Typ":   {newBackup(v1alpha1.BackupSource{Name: "x", Type: "Mongo"}), `unbekannter Typ "Mongo"`},
+	}
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := BuildCronJob(b, testDefaults); err == nil {
+			_, err := BuildCronJob(c.backup, testDefaults)
+			if err == nil {
 				t.Fatal("Fehler erwartet")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("Fehlermeldung %q enthält nicht %q", err, c.want)
 			}
 		})
 	}
