@@ -22,6 +22,18 @@ const (
 	sourcesPath = "/sources"
 	repoPath    = "/repo"
 	cachePath   = "/cache"
+
+	volumeRepo           = "repo"
+	volumeStage          = "stage"
+	volumeCache          = "cache"
+	sourceVolumePrefix   = "source-"
+	stageContainerPrefix = "stage-"
+
+	defaultPostgresPort = 5432
+	defaultCheckSubset  = "5%"
+	defaultTimeZone     = "Europe/Berlin"
+	defaultHistoryLimit = 3
+	jobBackoffLimit     = 2
 )
 
 type Defaults struct {
@@ -76,14 +88,14 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 	}
 
 	volumes := []corev1.Volume{
-		{Name: "repo", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: b.Spec.Repository.PVCName}}},
-		{Name: "stage", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-		{Name: "cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: volumeRepo, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: b.Spec.Repository.PVCName}}},
+		{Name: volumeStage, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: volumeCache, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 	}
 	resticMounts := []corev1.VolumeMount{
-		{Name: "repo", MountPath: repoPath},
-		{Name: "stage", MountPath: stagePath},
-		{Name: "cache", MountPath: cachePath},
+		{Name: volumeRepo, MountPath: repoPath},
+		{Name: volumeStage, MountPath: stagePath},
+		{Name: volumeCache, MountPath: cachePath},
 	}
 
 	var initContainers []corev1.Container
@@ -93,7 +105,7 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 	for _, s := range b.Spec.Sources {
 		srcDir := path.Join(sourcesPath, s.Name)
 		stageDir := path.Join(stagePath, s.Name)
-		volName := "source-" + s.Name
+		volName := sourceVolumePrefix + s.Name
 
 		if s.PVCName != "" {
 			volumes = append(volumes, corev1.Volume{
@@ -117,11 +129,11 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 			backupArgs = append(backupArgs, srcDir, "--exclude", path.Join(srcDir, s.SQLite.File)+"*")
 			dst := path.Join(stageDir, path.Base(s.SQLite.File))
 			initContainers = append(initContainers, corev1.Container{
-				Name:            "stage-" + s.Name,
+				Name:            stageContainerPrefix + s.Name,
 				Image:           images.SQLiteImage,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command:         []string{"sh", "-c", sqliteScript, "stage", path.Join(srcDir, s.SQLite.File), dst, strconv.FormatBool(s.SQLite.IntegrityCheck)},
-				VolumeMounts:    []corev1.VolumeMount{srcMount, {Name: "stage", MountPath: stagePath}},
+				VolumeMounts:    []corev1.VolumeMount{srcMount, {Name: volumeStage, MountPath: stagePath}},
 				Resources:       b.Spec.Resources,
 			})
 
@@ -130,7 +142,7 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 			pg := s.Postgres
 			dst := path.Join(stageDir, pg.Database+".dump")
 			initContainers = append(initContainers, corev1.Container{
-				Name:            "stage-" + s.Name,
+				Name:            stageContainerPrefix + s.Name,
 				Image:           images.PostgresImage,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Env: []corev1.EnvVar{{
@@ -138,7 +150,7 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 					ValueFrom: &corev1.EnvVarSource{SecretKeyRef: pg.PasswordSecretRef.DeepCopy()},
 				}},
 				Command:      []string{"sh", "-c", postgresScript, "stage", pg.Host, strconv.Itoa(int(pgPort(pg))), pg.User, pg.Database, dst},
-				VolumeMounts: []corev1.VolumeMount{{Name: "stage", MountPath: stagePath}},
+				VolumeMounts: []corev1.VolumeMount{{Name: volumeStage, MountPath: stagePath}},
 				Resources:    b.Spec.Resources,
 			})
 		}
@@ -189,7 +201,7 @@ func BuildCronJob(b *v1alpha1.Backup, d Defaults) (*batchv1.CronJob, error) {
 			JobTemplate: batchv1.JobTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: batchv1.JobSpec{
-					BackoffLimit: ptr.To(int32(2)),
+					BackoffLimit: ptr.To(int32(jobBackoffLimit)),
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: labels},
 						Spec: corev1.PodSpec{
@@ -252,28 +264,28 @@ func resolveImages(b *v1alpha1.Backup, d Defaults) Defaults {
 
 func pgPort(p *v1alpha1.PostgresSource) int32 {
 	if p.Port == 0 {
-		return 5432
+		return defaultPostgresPort
 	}
 	return p.Port
 }
 
 func checkSubset(b *v1alpha1.Backup) string {
 	if b.Spec.CheckReadDataSubset == "" {
-		return "5%"
+		return defaultCheckSubset
 	}
 	return b.Spec.CheckReadDataSubset
 }
 
 func timeZone(b *v1alpha1.Backup) string {
 	if b.Spec.TimeZone == "" {
-		return "Europe/Berlin"
+		return defaultTimeZone
 	}
 	return b.Spec.TimeZone
 }
 
 func historyLimit(v *int32) int32 {
 	if v == nil {
-		return 3
+		return defaultHistoryLimit
 	}
 	return *v
 }
